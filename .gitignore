@@ -1,0 +1,12 @@
+__pycache__/
+.DS_Store
+
+.env
+.panns/
+
+out/
+test/
+
+AGENTS.md
+.h3-refs/
+.ltx-refs/
