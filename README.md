@@ -5,13 +5,24 @@
 - `h3_video2prompt.py` — 動画を映像・音声解析し、H3の T2VA / I2VA / FL2VA / L2VA プロンプト（英語）または **LTX-2.5 の自然言語プロンプト**（`--mode LTX`）を生成。プロンプトなしの**映像の内容表示**（`--analysis-only`）にも対応
 - `h3_video2prompt_frames.py` — 同じ出力を、Pass1(映像解析)の入力をffmpegフレーム抽出方式に差し替えて生成する別モード（本体は無変更、詳細は後述）
 - `md/` — プロンプトガイド（H3ベース/Ref2VA、LTX-2.5ベース/IC-LoRA系）。`--analysis-only`以外の全モードで必須のため同梱
-- `AGENTS.md` — AIエージェント向けの作業メモ（環境・制約・注意点。公開リポジトリには含まれない）
+
+> **⚠️ どちらを使うか（重要）**: `h3_video2prompt.py` は動画をまるごと`video_url`としてLLMに送るため、
+> **動画Vision（video input）に対応したエンドポイント（vLLM等でホストされたVideo-LLM）が必須**です。
+> **`llama.cpp` / LM Studio 等、静止画（image_url）にしか対応していないバックエンドでは動きません。**
+> その場合は代わりに `h3_video2prompt_frames.py`（動画をffmpegで静止画に分割して`image_url`配列で送る方式）を使ってください。
+>
+> **動画Vision対応LLMの例（2026-09時点、要最新確認）**:
+> - ✅ Qwen3.6 / Qwen3.8 系（Qwen-VL系）
+> - ✅ Gemma4 系
+> - ❌ DeepSeek — `DeepSeek-V4-Flash-Vision-Exp`で画像Visionには対応したが、**動画は未対応**
+>
+> 上記以外のモデルも含め、使用するモデル・エンドポイントが動画Vision（`video_url`）に対応しているか事前に確認してください。非対応の場合は `h3_video2prompt_frames.py` を使用してください。
 
 ---
 
 ## 1. 概要
 
-入力の mp4 動画を **OpenAI API 互換のビジョンLLM**（既定 `http://192.168.11.100:8888/v1` / `qwen38-27b-dflash2`）で解析し、H3 が期待するプロンプト構造（`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music` など）に改写する。
+入力の mp4 動画を **OpenAI API 互換のビジョンLLM**（例: `http://192.168.11.100:8888/v1` / `qwen38-27b-dflash2`。`.env`で変更可、詳細は後述）で解析し、H3 が期待するプロンプト構造（`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music` など）または LTX-2.5 の自然言語プロンプト（`--mode LTX`）に変換する。
 
 処理パイプライン:
 
@@ -39,19 +50,19 @@ video.mp4
 - 映像解析には **フレーム分割しない下書きmp4をそのまま**渡す（`video_url` base64形式）
 - キーフレーム（first/last）はLLMには渡さず**元解像度を維持**（H3 APIの参照画像用）
 - **フェードイン/アウト対策**: 単純に0.0s/末尾からフレームを切ると黒フレームになるケースを避けるため、`blackdetect`（全ピクセル暗区間）と`signalstats`のフレーム平均輝度で「実際に映像が視える」先頭/末尾フレームを特定し、そこからキーフレームを切る。解析用動画もこの範囲にトリムされる
-- プロンプト本文は**英語**、対白・歌詞・画面表示テキストのみ原文言語を保持
+- プロンプト本文は**英語**、セリフ・歌詞・画面表示テキストのみ原文言語を保持
 
 ## 2. インストール / セットアップ
 
 ### 前提
 - macOS (Apple Silicon) / Linux
-- Python 3.10+（conda環境 `dev` を使用）
+- Python 3.10+（任意の仮想環境で可。以下は一例として`dev`という名前を使用）
 - `ffmpeg` と `ffprobe` が PATH にあること
 
-### 依存パッケージ（conda の dev 環境）
+### 依存パッケージ
 
 ```bash
-conda activate dev
+conda activate dev   # 任意の環境名でよい（venv等でも可）
 pip install requests python-dotenv
 pip install mlx-whisper          # ASR（セリフ・歌詞）
 pip install panns-inference      # 音声タグ（音楽・環境音 / torch・torchlibrosa 付き）
@@ -59,6 +70,37 @@ pip install panns-inference      # 音声タグ（音楽・環境音 / torch・t
 
 > `panns-inference` は PyPI 公式パッケージ（`panns` パッケージはPython2構文で壊れているため使用しない）。
 > `mlx-whisper` は初回実行時にモデル（`mlx-community/whisper-large-v3-turbo`）を HuggingFace から自動ダウンロードする。
+
+### PC (CUDA) の場合
+
+> 但し未確認（このリポジトリの開発・動作確認はmacOS環境のみで行っており、CUDA環境では未検証）。
+
+`mlx-whisper` は Apple の MLX フレームワーク前提のため **Apple Silicon Mac専用** で、Windows/Linux (CUDA) 環境では動作しない。ASR (`h3_video2prompt.py` / `h3_video2prompt_frames.py` の `transcribe()`) を以下のいずれかに差し替えること。
+
+```bash
+pip install faster-whisper       # CTranslate2ベース。CUDA対応、速度面で推奨
+# もしくは
+pip install openai-whisper       # オリジナル実装。CUDA対応だが faster-whisper より低速
+```
+
+`transcribe()` は `{"segments": [{"start", "end", "text"}, ...], "text": ...}` の形を返せば後続処理（`format_transcript()` 等）は無改修で動く。`faster-whisper` での実装例:
+
+```python
+def transcribe(wav: Path, model: str, language: str | None) -> dict:
+    from faster_whisper import WhisperModel
+    m = WhisperModel(model, device="cuda", compute_type="float16")
+    segments, info = m.transcribe(str(wav), language=language)
+    segments = list(segments)  # ジェネレータなので先にリスト化
+    return {
+        "segments": [{"start": s.start, "end": s.end, "text": s.text} for s in segments],
+        "text": "".join(s.text for s in segments),
+        "language": info.language,
+    }
+```
+
+`DEFAULT_ASR_MODEL`（既定 `mlx-community/whisper-large-v3-turbo`）も `faster-whisper` 用のモデル名（例: `large-v3-turbo`）に変更が必要。ASRなしで進める場合は `--no-asr`、既存の文字起こしがあれば `--transcript` で代替できる。
+
+なお `panns-inference` (PyTorch) は OS/GPU非依存でそのままCUDA環境でも動作する（`device="cuda"` に変更すれば高速化も可能、既定は `device="cpu"`）。
 
 ### PANNs 重み
 `.panns/Cnn14_mAP=0.431.pth`（約315MB）をこのディレクトリに配置。
@@ -85,7 +127,7 @@ H3_MODEL=qwen38-27b-dflash2
 ## 3. 使い方
 
 ```bash
-conda activate dev
+conda activate dev   # 上でセットアップした環境を使う（環境名は任意）
 
 # テキスト生成のみ（キーフレーム不要）
 python h3_video2prompt.py video.mp4 --mode T2VA
@@ -138,7 +180,7 @@ python h3_video2prompt_frames.py video.mp4 --mode I2VA --duration 8 \
 | `--asr-language` | 自動検出 | ASRの言語コード（例: `ja`, `en`） |
 | `--no-audio-tags` | 無効 | 音声タグ(PANNs)算出をしない（既定: 音声があれば自動実行） |
 | `--tags-threshold` / `--tags-max` | `0.05` / `12` | 音声タグの信頼度閾値 / 出力タグの最大数 |
-| `--transcript f.txt` | なし | 対白の文字起こしを直接指定（ASRの上書き） |
+| `--transcript f.txt` | なし | セリフの文字起こしを直接指定（ASRの上書き） |
 | `--reuse-analysis [path]` | なし | LLM Pass1（映像解析）をスキップし既存の `analysis.json` を再利用（引数なし: `out/<動画名>/analysis.json`）。H3/LTXを同じ解析で出す際にPass1のLLM呼び出しを省く |
 | `--analysis-only` | 無効 | LLM Pass1（映像解析）までで終了。プロンプトは生成せず、`analysis.json` / `transcript.txt` / `audio_tags.txt` と内容サマリを表示する（agent skill `video-content` がこれを使う） |
 | `--guide file.md` | H3系: `md/minimax-h3-prompt-guide-base.md` / LTX: `md/ltx-prompt-guide-base.md` | 改写用ガイド |
@@ -176,7 +218,7 @@ python h3_video2prompt_frames.py video.mp4 --mode I2VA --duration 8 \
 
 - LTXはH3と違い **構造化フィールドやアライメント行がない**（自然言語プロンプトのみ）
 - 動画長は **6〜20秒**（6,8,10,...,20にスナップ）。既定では解析対象動画長を妥当値に丸める
-- 対白は**二重クォート `"...")`**。日本語の対白・歌詞は**ひらがなへ変換して出力**（漢字・カタカナ禁止。他言語は原文のまま）
+- セリフは**二重クォート `"...")`**。日本語のセリフ・歌詞は**ひらがなへ変換して出力**（漢字・カタカナ禁止。他言語は原文のまま）
 - キーフレーム抽出・アライメント行付与は行わない（I2V相当は別途対応）
 - 詳細は [`md/ltx-prompt-guide-base.md`](md/ltx-prompt-guide-base.md) / [IC-LoRA系](md/ltx-prompt-guide-ic-lora.md)
 
@@ -208,7 +250,7 @@ python h3_video2prompt_frames.py video.mp4 --mode I2VA --duration 8 \
 ## 6. トラブルシューティング
 
 - **LLM応答が遅い/タイムアウト**: `--max-side 360` や `--max-seconds` を小さくして解析対象を軽くする
-- **対白が不正確**: `--transcript` で文字起こしを渡す。歌唱の歌詞はWhisperの精度限界で推測混じりになるため、`out/<動画>/transcript.txt` を手直しして `--transcript` で再実行するのが確実
+- **セリフが不正確**: `--transcript` で文字起こしを渡す。歌唱の歌詞はWhisperの精度限界で推測混じりになるため、`out/<動画>/transcript.txt` を手直しして `--transcript` で再実行するのが確実
 - **音声タグが壊れた（numbaキャッシュエラー）**: PANNsはASRと同じプロセス内で走らせると numba が壊れるため、内部でサブプロセス分離している。それでも失敗したら `--no-audio-tags` で省略
 - **ガイドがないエラー**: H3系は `--guide md/minimax-h3-prompt-guide-base.md`、LTXは `--guide md/ltx-prompt-guide-base.md` を指定
 - **LTXの長さが想定と違う**: LTXモードは 6〜20秒の妥当値（6,8,10,...,20）にスナップされる（H3の4〜15秒とは別ロジック）。`--duration` で固定可
