@@ -674,7 +674,11 @@ Read the LTX prompt-writing guide below, then use the video analysis JSON to pro
    Japanese lines must be in HIRAGANA ONLY (no kanji, no katakana).
 6. If there are multiple shots (2-4), keep them in one chronological paragraph with explicit transition language at each cut and stated audio continuity.
 7. Do not invent on-screen text, brands, or logos. If the source has readable text, keep it short.
-8. If there is no dialogue, no singing, and no on-screen speaking source, do not invent any.
+8. The analysis JSON's dialogue entries (and the ground-truth transcript above, if provided) are real
+   speech that was actually heard — render every one of those lines as quoted dialogue at its correct
+   timestamp. This applies whether the speaker is on-screen or off-screen (voiceover/narration); do not
+   skip a line just because no speaker is visibly on screen. Only skip inventing dialogue when the
+   analysis has zero dialogue entries, no singing, and no transcript was provided.
 """
 
     return f"""You are writing a MiniMax H3 video-generation prompt.
@@ -701,8 +705,15 @@ Read the H3 prompt-writing guide below, then use the video analysis JSON to prod
 3. Preserve the exact field names: integrated_multimodal_description, overall_soundscape, non_diegetic_music.
 4. Never output the image-alignment instruction line ("For the target video..." or "How the reference pictures align...") — the tool adds it.
 5. For keyframe modes, reference <Picture 1>/Picture 2 in the shot descriptions.
-6. Dialogue inside <d>[Language] ... </d> must keep the original language verbatim.
-7. If there is no dialogue, no singing, and no on-screen speaking source, do not invent any <d> blocks.
+6. Dialogue inside <d>[Language] ... </d> must keep the original language verbatim. The [Language] tag
+   itself must always be the English name of the language (e.g. "[Japanese]", "[English]", "[Korean]"),
+   never translated/localized (do not write "[日本語]" or similar) — only the dialogue text stays in its
+   original language.
+7. The analysis JSON's dialogue entries (and the ground-truth transcript above, if provided) are real
+   speech that was actually heard — render every one of those lines as a <d> block at its correct
+   timestamp, whether the speaker is on-screen or off-screen (voiceover/narration); do not skip a line
+   just because no speaker is visibly on screen. Only skip adding <d> blocks when the analysis has zero
+   dialogue entries, no singing, and no transcript was provided.
 8. overall_soundscape: 1-4 sentences; non_diegetic_music: 1-3 sentences or "N/A".
 9. For overall_soundscape, infer plausible ambient/physical/non-verbal sounds from the visual content (weather, locations, actions, crowds). Use "N/A" only when the scene truly has no plausible sound source.
 """
