@@ -256,3 +256,7 @@ python h3_video2prompt_frames.py video.mp4 --mode I2VA --duration 8 \
 - **LTXの長さが想定と違う**: LTXモードは 6〜20秒の妥当値（6,8,10,...,20）にスナップされる（H3の4〜15秒とは別ロジック）。`--duration` で固定可
 - **フェード検出が合わない**: `--content-start` / `--content-end` で手動指定、または `--keep-fade` で無効化
 - **`Operation not permitted`（パッケージ/モデルの書込）**: conda環境やホームディレクトリへの書込が必要な場合（pip install、モデルDL）、サンドボックス外の権限で実行すること
+
+## 7. ライセンス
+
+[MIT License](LICENSE)
